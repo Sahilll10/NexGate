@@ -47,6 +47,8 @@ async function checkRateLimit(req, res, next) {
     const rule = await resolveRateLimitRule(apiId, _keyDoc.teamId.toString());
     req._rateLimitAlgorithm = rule.algorithm;
 
+    console.log(`\n[RateLimit Debug] Loaded Rule for API ${apiId}:`, JSON.stringify(rule));
+
     let result;
     const params = { apiId: apiId.toString(), teamId: _keyDoc.teamId.toString(), maxRequests: rule.maxRequests, windowMs: rule.windowMs };
 
@@ -56,6 +58,8 @@ async function checkRateLimit(req, res, next) {
       case 'fixed_window': result = await checkFixedWindow(params); break;
       default: result = await checkSlidingWindowLog(params);
     }
+
+    console.log(`[RateLimit Debug] Algorithm Result:`, JSON.stringify(result));
 
     if (!result.allowed) {
       return res.status(429).json({ error: 'RATE_LIMIT_EXCEEDED', message: 'Too many requests.', requestId: req.requestId });
