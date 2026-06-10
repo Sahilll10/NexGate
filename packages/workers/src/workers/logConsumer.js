@@ -44,7 +44,7 @@
 const { Worker, Queue } = require('bullmq');
 const { getRedisClient } = require('../../../gateway/src/db/redis');
 const { RequestLog } = require('../../../gateway/src/db/models/index');
-const { recordMetric } = require('../../api/src/socket/index');
+// const { recordMetric } = require('../../api/src/socket/index');
 
 const LOG_QUEUE_NAME = process.env.LOG_QUEUE_NAME || 'nexgate:logs';
 const BATCH_SIZE = 50;
@@ -68,15 +68,15 @@ async function flushBatch() {
     await RequestLog.insertMany(batch, { ordered: false });
 
     // After successful write, record metrics for WebSocket emission
-    batch.forEach(log => {
-      recordMetric({
-        apiId: log.meta?.apiId,
-        teamId: log.meta?.teamId,
-        apiName: log.apiName,
-        latencyMs: log.latencyMs,
-        statusCode: log.statusCode,
-      });
-    });
+    // batch.forEach(log => {
+    //   recordMetric({
+    //     apiId: log.meta?.apiId,
+    //     teamId: log.meta?.teamId,
+    //     apiName: log.apiName,
+    //     latencyMs: log.latencyMs,
+    //     statusCode: log.statusCode,
+    //   });
+    // });
 
     console.debug(`[LogConsumer] Flushed ${batch.length} logs to MongoDB`);
   } catch (err) {
