@@ -8,7 +8,6 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "concurrently \"npm run dev:gateway\" \"npm run dev:api\" \"npm run dev:workers\" \"npm run dev:portal\"",
     "dev:gateway": "npm run dev --workspace=packages/gateway",
     "dev:api": "npm run dev --workspace=packages/api",
     "dev:workers": "npm run dev --workspace=packages/workers",
@@ -17,7 +16,11 @@
     "lint": "eslint packages/*/src/**/*.js",
     "init-db": "node scripts/init-db.js",
     "seed": "node scripts/seed.js",
-    "test": "npm run test --workspaces --if-present"
+    "test": "npm run test --workspaces --if-present",
+    "dev": "concurrently \"npm run dev:gateway\" \"npm run dev:api\" \"npm run dev:workers\" \"npm run dev:portal\"",
+    "start:gateway": "node packages/gateway/src/index.js",
+    "start:api": "node packages/api/src/index.js",
+    "start:workers": "node packages/workers/src/index.js"
   },
   "devDependencies": {
     "concurrently": "^8.2.0",
