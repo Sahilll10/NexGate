@@ -46,7 +46,7 @@ const { getRedisClient } = require('../../../gateway/src/db/redis');
 const { RequestLog } = require('../../../gateway/src/db/models/index');
 // const { recordMetric } = require('../../api/src/socket/index');
 
-const LOG_QUEUE_NAME = process.env.LOG_QUEUE_NAME || 'nexgate:logs';
+const LOG_QUEUE_NAME = process.env.LOG_QUEUE_NAME || 'nexgate-logs';
 const BATCH_SIZE = 50;
 const BATCH_WINDOW_MS = 500;
 const WORKER_CONCURRENCY = 5;
