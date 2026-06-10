@@ -1,0 +1,243 @@
+name: NexGate CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Prevent multiple concurrent deployments
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # ─── LINT & TYPE CHECK ──────────────────────────────────────────────────────
+  lint:
+    name: Lint & Validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint gateway
+        run: |
+          cd packages/gateway
+          npx eslint src --ext .js --max-warnings 0 || echo "ESLint warnings found (non-blocking)"
+
+      - name: Lint workers
+        run: |
+          cd packages/workers
+          npx eslint src --ext .js || echo "ESLint warnings found"
+
+      - name: Lint portal
+        run: |
+          cd packages/portal
+          npx eslint src --ext .js,.jsx || echo "ESLint warnings found"
+
+      - name: Validate env schemas
+        run: |
+          echo "Validating gateway env schema..."
+          node -e "
+            process.env.NODE_ENV='test';
+            process.env.MONGODB_URI='mongodb://localhost:27017/test';
+            process.env.REDIS_URL='redis://localhost:6379';
+            require('./packages/gateway/src/config/env.js');
+            console.log('✅ Gateway env schema valid');
+          "
+
+  # ─── UNIT TESTS ─────────────────────────────────────────────────────────────
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Test rate limiting algorithms
+        run: |
+          node -e "
+          const { checkFixedWindow } = require('./packages/gateway/src/algorithms/fixedWindow');
+          const { getRedisClient } = require('./packages/gateway/src/db/redis');
+          process.env.REDIS_URL = 'redis://localhost:6379';
+          process.env.REDIS_TLS = 'false';
+          async function test() {
+            const params = { apiId: 'test-api', teamId: 'test-team', maxRequests: 5, windowMs: 60000 };
+            let allowed = 0;
+            for (let i = 0; i < 7; i++) {
+              const r = await checkFixedWindow(params);
+              if (r.allowed) allowed++;
+            }
+            const redis = getRedisClient();
+            await redis.quit();
+            if (allowed !== 5) throw new Error('Expected 5 allowed, got ' + allowed);
+            console.log('✅ Fixed Window test passed (5/7 allowed)');
+          }
+          test().catch(e => { console.error(e); process.exit(1); });
+          "
+        env:
+          REDIS_URL: redis://localhost:6379
+          REDIS_TLS: "false"
+          NODE_ENV: test
+          MONGODB_URI: mongodb://localhost:27017/test
+
+      - name: Test crypto utilities
+        run: |
+          node -e "
+          const { generateApiKey, hashApiKey } = require('./packages/gateway/src/utils/crypto');
+          const { rawKey, keyHash } = generateApiKey();
+          if (!rawKey.startsWith('nxg_')) throw new Error('Key must start with nxg_');
+          if (rawKey.length < 68) throw new Error('Key too short');
+          if (hashApiKey(rawKey) !== keyHash) throw new Error('Hash mismatch');
+          if (hashApiKey(rawKey) !== hashApiKey(rawKey)) throw new Error('Hash not deterministic');
+          console.log('✅ Crypto tests passed');
+          "
+
+  # ─── BUILD (Portal) ─────────────────────────────────────────────────────────
+  build-portal:
+    name: Build Portal
+    runs-on: ubuntu-latest
+    needs: [lint]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Build React portal
+        working-directory: packages/portal
+        run: npm run build
+        env:
+          VITE_API_URL: ${{ secrets.VITE_API_URL || 'https://nexgate-api.onrender.com/api' }}
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: portal-build
+          path: packages/portal/dist
+          retention-days: 7
+
+  # ─── DEPLOY TO VERCEL (Portal) ──────────────────────────────────────────────
+  deploy-portal:
+    name: Deploy Portal → Vercel
+    runs-on: ubuntu-latest
+    needs: [build-portal, test]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment:
+      name: production
+      url: ${{ steps.vercel.outputs.url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to Vercel
+        id: vercel
+        uses: amondnet/vercel-action@v25
+        with:
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          working-directory: packages/portal
+          vercel-args: '--prod'
+        env:
+          VITE_API_URL: ${{ secrets.VITE_API_URL }}
+
+  # ─── DEPLOY GATEWAY → RENDER ────────────────────────────────────────────────
+  deploy-gateway:
+    name: Deploy Gateway → Render
+    runs-on: ubuntu-latest
+    needs: [test]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Run DB migrations before deploy
+        run: |
+          echo "Running DB init script via Render one-off job..."
+          # Trigger a Render one-off job to run init-db.js before new version starts
+          # This ensures schema changes land before the gateway starts
+          curl -s -X POST "https://api.render.com/v1/services/${{ secrets.RENDER_MIGRATION_SERVICE_ID }}/jobs" \
+            -H "Authorization: Bearer ${{ secrets.RENDER_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d '{"startCommand": "node scripts/init-db.js"}' | jq '.'
+
+      - name: Deploy gateway to Render
+        run: |
+          curl -s -X POST "https://api.render.com/v1/services/${{ secrets.RENDER_GATEWAY_SERVICE_ID }}/deploys" \
+            -H "Authorization: Bearer ${{ secrets.RENDER_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d '{"clearCache": "do_not_clear"}' | jq '.'
+
+      - name: Wait for gateway health check
+        run: |
+          echo "Waiting 30s for deployment to start..."
+          sleep 30
+          for i in {1..12}; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" ${{ secrets.GATEWAY_HEALTH_URL }}/health)
+            echo "Attempt $i: HTTP $STATUS"
+            if [ "$STATUS" = "200" ]; then
+              echo "✅ Gateway is healthy"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "❌ Gateway health check failed after 2 minutes"
+          exit 1
+
+  # ─── DEPLOY WORKERS → RENDER ────────────────────────────────────────────────
+  deploy-workers:
+    name: Deploy Workers → Render
+    runs-on: ubuntu-latest
+    needs: [test]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Deploy workers to Render
+        run: |
+          curl -s -X POST "https://api.render.com/v1/services/${{ secrets.RENDER_WORKERS_SERVICE_ID }}/deploys" \
+            -H "Authorization: Bearer ${{ secrets.RENDER_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d '{"clearCache": "do_not_clear"}' | jq '.'
+
+  # ─── DEPLOY MANAGEMENT API → RENDER ─────────────────────────────────────────
+  deploy-api:
+    name: Deploy Management API → Render
+    runs-on: ubuntu-latest
+    needs: [test]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Deploy management API to Render
+        run: |
+          curl -s -X POST "https://api.render.com/v1/services/${{ secrets.RENDER_API_SERVICE_ID }}/deploys" \
+            -H "Authorization: Bearer ${{ secrets.RENDER_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d '{"clearCache": "do_not_clear"}' | jq '.'
+
+  # ─── ROLLBACK INSTRUCTIONS ──────────────────────────────────────────────────
+  # If a deployed version is broken:
+  # 1. Go to Render Dashboard → Service → "Deploys" tab → click previous deploy → "Rollback"
+  # 2. Or via CLI: curl -X POST "https://api.render.com/v1/deploys/{deploy-id}/rollback" \
+  #      -H "Authorization: Bearer $RENDER_API_KEY"
+  # Vercel: `vercel rollback` or click "Revert" in the Vercel dashboard.
+  # Automated rollback: Add a post-deploy smoke test and trigger rollback on failure.

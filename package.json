@@ -1,0 +1,29 @@
+{
+  "name": "nexgate",
+  "version": "1.0.0",
+  "description": "NexGate — Enterprise Internal API Gateway & Observability Platform",
+  "author": "Sahil Kumar (Roll: 3252)",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev:gateway\" \"npm run dev:api\" \"npm run dev:workers\" \"npm run dev:portal\"",
+    "dev:gateway": "npm run dev --workspace=packages/gateway",
+    "dev:api": "npm run dev --workspace=packages/api",
+    "dev:workers": "npm run dev --workspace=packages/workers",
+    "dev:portal": "npm run dev --workspace=packages/portal",
+    "build": "npm run build --workspaces",
+    "lint": "eslint packages/*/src/**/*.js",
+    "init-db": "node scripts/init-db.js",
+    "seed": "node scripts/seed.js",
+    "test": "npm run test --workspaces --if-present"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.0",
+    "eslint": "^8.56.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

@@ -1,0 +1,97 @@
+version: '3.9'
+
+# NexGate — Local Development Stack
+# ════════════════════════════════════════════════════════════════════════════
+# Provides local MongoDB + Redis so you don't need Atlas/Upstash for development.
+# In production, use MongoDB Atlas + Upstash Redis.
+#
+# Usage:
+#   docker compose up -d          # Start MongoDB + Redis
+#   docker compose down           # Stop everything
+#   docker compose down -v        # Stop and delete data volumes
+
+services:
+  # ─── MongoDB ─────────────────────────────────────────────────────────────
+  mongodb:
+    image: mongo:7.0
+    container_name: nexgate-mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: nexgate
+      MONGO_INITDB_ROOT_PASSWORD: nexgate_dev_password
+      MONGO_INITDB_DATABASE: nexgate
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+      - ./scripts/mongo-init.js:/docker-entrypoint-initdb.d/init.js:ro
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ─── Redis ───────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: nexgate-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --save ""
+      --appendonly no
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ─── Redis Insight (Optional — Redis GUI) ────────────────────────────────
+  redis-insight:
+    image: redis/redisinsight:latest
+    container_name: nexgate-redis-insight
+    restart: unless-stopped
+    ports:
+      - "5540:5540"
+    depends_on:
+      redis:
+        condition: service_healthy
+    profiles:
+      - tools  # Only starts with: docker compose --profile tools up
+
+  # ─── Mongo Express (Optional — MongoDB GUI) ──────────────────────────────
+  mongo-express:
+    image: mongo-express:1.0
+    container_name: nexgate-mongo-express
+    restart: unless-stopped
+    environment:
+      ME_CONFIG_MONGODB_ADMINUSERNAME: nexgate
+      ME_CONFIG_MONGODB_ADMINPASSWORD: nexgate_dev_password
+      ME_CONFIG_MONGODB_URL: mongodb://nexgate:nexgate_dev_password@mongodb:27017/
+      ME_CONFIG_BASICAUTH: "false"
+    ports:
+      - "8081:8081"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    profiles:
+      - tools
+
+volumes:
+  mongo_data:
+    driver: local
+  redis_data:
+    driver: local
+
+# ─── LOCAL .ENV SETTINGS ─────────────────────────────────────────────────
+# When using docker-compose, set these in packages/gateway/.env:
+#   MONGODB_URI=mongodb://nexgate:nexgate_dev_password@localhost:27017/nexgate?authSource=admin
+#   REDIS_URL=redis://localhost:6379
+#   REDIS_TLS=false
