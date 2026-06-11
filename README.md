@@ -1,7 +1,14 @@
 # ⚡ NexGate — Enterprise Internal API Gateway & Observability Platform
 
-**Author:** Sahil Kumar (Roll: 3252)  
 **Stack:** MongoDB · Express · React · Node.js · Redis · BullMQ · Socket.io
+
+---
+
+## 🌐 Live Demo & Access
+
+The NexGate control plane and dashboard are live. You can log in and view the live metrics, manage API keys, and configure rate limits in real-time.
+
+* **Dashboard URL:** [https://nex-gate-portal-db78yjg42-sahilll10s-projects.vercel.app](https://nex-gate-portal-db78yjg42-sahilll10s-projects.vercel.app)
 
 ---
 
