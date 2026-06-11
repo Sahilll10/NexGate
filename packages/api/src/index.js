@@ -29,6 +29,9 @@ const {
 const app = express();
 const httpServer = http.createServer(app);
 
+// Trust Render's load balancer so the rate limiter works correctly
+app.set('trust proxy', 1);
+
 // ─── SECURITY MIDDLEWARE ─────────────────────────────────────────────────────
 app.use(helmet({
   contentSecurityPolicy: {
@@ -41,8 +44,13 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' },
 }));
 
+// Allow both local development and the live Vercel frontend
 app.use(cors({
-  origin: process.env.PORTAL_URL || 'http://localhost:5173',
+  origin: [
+    'http://localhost:5173',
+    'https://nex-gate-portal-db78yjg42-sahilll10s-projects.vercel.app',
+    process.env.PORTAL_URL
+  ].filter(Boolean),
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
@@ -135,7 +143,7 @@ async function start() {
     // Initialise Socket.io after Redis is confirmed ready
     initSocketIO(httpServer);
 
-    const PORT = process.env.API_PORT || 4000;
+    const PORT = process.env.API_PORT || process.env.PORT || 4000;
     const HOST = process.env.API_HOST || '0.0.0.0';
 
     httpServer.listen(PORT, HOST, () => {
