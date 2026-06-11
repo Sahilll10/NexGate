@@ -44,13 +44,9 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' },
 }));
 
-// Allow both local development and the live Vercel frontend
+// Dynamically trust the incoming origin to prevent Vercel domain mismatches
 app.use(cors({
-  origin: [
-    'http://localhost:5173',
-    'https://nex-gate-portal-db78yjg42-sahilll10s-projects.vercel.app',
-    process.env.PORTAL_URL
-  ].filter(Boolean),
+  origin: true, 
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
